@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>3D Просмотрщик - Моя модель</title>
+    <title>3D Просмотрщик</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -28,12 +28,13 @@
         .loading-content {
             text-align: center;
             padding: 40px;
+            max-width: 500px;
         }
         
         .loader {
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(52, 152, 219, 0.3);
+            width: 60px;
+            height: 60px;
+            border: 6px solid rgba(52, 152, 219, 0.3);
             border-top-color: #3498db;
             border-radius: 50%;
             animation: spin 1s linear infinite;
@@ -42,6 +43,23 @@
         
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+        
+        .progress-bar {
+            width: 300px;
+            height: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3498db;
+            width: 0%;
+            transition: width 0.3s;
+            border-radius: 5px;
         }
         
         #canvas-container {
@@ -114,6 +132,11 @@
             display: none;
         }
         
+        #error-message {
+            background: rgba(231, 76, 60, 0.9);
+            display: none;
+        }
+        
         #model-info {
             position: absolute;
             top: 20px;
@@ -152,6 +175,16 @@
             background: rgba(52, 152, 219, 1);
             border-radius: 50%;
         }
+        
+        .fallback-button {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -159,8 +192,17 @@
     <div id="loading-screen">
         <div class="loading-content">
             <div class="loader"></div>
-            <h2>Загрузка 3D модели...</h2>
+            <h2 id="loading-title">Загрузка 3D модели...</h2>
             <p id="loading-text">Пожалуйста, подождите</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div id="fallback-section" style="display: none; margin-top: 20px;">
+                <p>Проблемы с загрузкой модели?</p>
+                <button class="fallback-button" onclick="loadFallbackModel()">
+                    Загрузить тестовую модель
+                </button>
+            </div>
         </div>
     </div>
     
@@ -172,6 +214,7 @@
     
     <!-- Сообщение -->
     <div class="message" id="message"></div>
+    <div class="message" id="error-message"></div>
     
     <!-- Информация о модели -->
     <div id="model-info">
@@ -192,9 +235,6 @@
         <p><span class="hotkey">W/S</span> - зум</p>
         <p><span class="hotkey">Стрелки</span> - вращение</p>
         <p><span class="hotkey">Пробел</span> - центрировать модель</p>
-        <p style="margin-top: 15px; font-size: 11px; color: #aaa;">
-            Модель загружается автоматически при открытии страницы
-        </p>
     </div>
 
     <!-- Three.js -->
@@ -203,12 +243,14 @@
     
     <script>
         // ============ НАСТРОЙКИ ============
-        const MODEL_URL = 'my-model.glb'; // должно совпадать с именем файла
-        const MODEL_NAME = 'Моя 3D модель'; // Название для отображения
+        const MODEL_URL = 'my-model.glb'; // ЗАМЕНИТЕ НА ИМЯ ВАШЕГО ФАЙЛА
+        const MODEL_NAME = '3D Модель';
+        const TIMEOUT_MS = 30000; // 30 секунд таймаут
         
         // ============ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ============
         let scene, camera, renderer;
         let model = null;
+        let loadTimeout = null;
         
         // Орбитальная камера
         let orbitTarget = new THREE.Vector3(0, 0, 0);
@@ -222,42 +264,65 @@
         let rotationSpeed = 0.02;
         let zoomSpeed = 0.1;
         let panSpeed = 0.005;
+
+        // ============ ОБНОВЛЕНИЕ ПРОГРЕССА ============
+        function updateProgress(percent, text) {
+            document.getElementById('progress-fill').style.width = percent + '%';
+            document.getElementById('loading-text').textContent = text;
+        }
         
-        // Для вращения мышкой
-        let isLeftMouseDown = false;
-        let isRightMouseDown = false;
-        let lastMouseX = 0;
-        let lastMouseY = 0;
+        function showError(message) {
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error-message').style.display = 'block';
+            document.getElementById('fallback-section').style.display = 'block';
+            document.getElementById('loading-title').textContent = 'Ошибка загрузки';
+            
+            setTimeout(() => {
+                document.getElementById('error-message').style.display = 'none';
+            }, 5000);
+        }
 
         // ============ ЗАГРУЗКА МОДЕЛИ ============
         async function loadModel() {
             try {
-                updateLoadingText('Загрузка модели...');
+                updateProgress(10, 'Подготовка...');
+                
+                // Таймаут загрузки
+                loadTimeout = setTimeout(() => {
+                    showError('Таймаут загрузки. Модель слишком большая или недоступна.');
+                    loadFallbackModel();
+                }, TIMEOUT_MS);
                 
                 const loader = new THREE.GLTFLoader();
                 
-                // Загружаем модель с указанного URL
+                updateProgress(30, 'Загрузка модели...');
+                
                 const gltf = await new Promise((resolve, reject) => {
                     loader.load(
-                        https://drive.google.com/file/d/1FFaT3uEyWoyYFT0cBFCosG9ca43MRjMv/view?usp=sharing,
+                        MODEL_URL,
                         resolve,
                         (progress) => {
-                            const percent = Math.round((progress.loaded / progress.total) * 100);
-                            updateLoadingText(`Загрузка модели... ${percent}%`);
+                            if (progress.total > 0) {
+                                const percent = Math.round((progress.loaded / progress.total) * 100);
+                                updateProgress(30 + percent * 0.6, `Загрузка модели... ${percent}%`);
+                            }
                         },
                         reject
                     );
                 });
                 
-                updateLoadingText('Обработка модели...');
+                clearTimeout(loadTimeout);
+                
+                updateProgress(95, 'Обработка модели...');
                 
                 model = gltf.scene;
                 
-                // Серый цвет модели
+                // Упрощенный материал
                 model.traverse(function(child) {
                     if (child.isMesh) {
                         child.material = new THREE.MeshLambertMaterial({ 
-                            color: 0x555555
+                            color: 0x888888,
+                            flatShading: true
                         });
                         child.castShadow = true;
                         child.receiveShadow = true;
@@ -266,7 +331,7 @@
                 
                 scene.add(model);
                 
-                // Центрируем модель
+                // Быстрое центрирование
                 const box = new THREE.Box3().setFromObject(model);
                 const center = box.getCenter(new THREE.Vector3());
                 const size = box.getSize(new THREE.Vector3());
@@ -275,32 +340,85 @@
                 model.position.y = -center.y;
                 model.position.z = -center.z;
                 
-                // Автомасштабирование
+                // Быстрое масштабирование
                 const maxDim = Math.max(size.x, size.y, size.z);
-                if (maxDim > 10) {
-                    const scale = 10 / maxDim;
+                if (maxDim > 0) {
+                    const scale = Math.min(10 / maxDim, 5);
                     model.scale.setScalar(scale);
                 }
                 
                 orbitTarget.copy(new THREE.Vector3(0, 0, 0));
                 
-                // Показываем 3D просмотрщик
-                show3DViewer();
+                updateProgress(100, 'Готово!');
                 
-                // Автоматически центрируем модель
                 setTimeout(() => {
+                    show3DViewer();
                     centerModelInView();
-                }, 100);
+                }, 500);
                 
             } catch (error) {
-                console.error('❌ Ошибка загрузки модели:', error);
-                updateLoadingText('Ошибка загрузки модели. Создаем тестовую модель...');
-                createTestModel();
+                clearTimeout(loadTimeout);
+                console.error('❌ Ошибка загрузки:', error);
+                showError('Ошибка загрузки модели: ' + error.message);
+                
+                // Автоматический фолбэк через 3 секунды
+                setTimeout(() => {
+                    loadFallbackModel();
+                }, 3000);
             }
         }
         
-        function updateLoadingText(text) {
-            document.getElementById('loading-text').textContent = text;
+        function loadFallbackModel() {
+            clearTimeout(loadTimeout);
+            updateProgress(50, 'Создание тестовой модели...');
+            
+            if (model) {
+                scene.remove(model);
+                model = null;
+            }
+            
+            // Простая тестовая модель
+            const group = new THREE.Group();
+            
+            // Кубик
+            const cubeGeometry = new THREE.BoxGeometry(2, 2, 2);
+            const cubeMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x3498db
+            });
+            const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+            cube.position.y = 1;
+            group.add(cube);
+            
+            // Конус
+            const coneGeometry = new THREE.ConeGeometry(1, 3, 8);
+            const coneMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x2ecc71
+            });
+            const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            cone.position.x = 3;
+            cone.position.y = 1.5;
+            group.add(cone);
+            
+            // Сфера
+            const sphereGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+            const sphereMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0xe74c3c
+            });
+            const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+            sphere.position.x = -3;
+            sphere.position.y = 1.5;
+            group.add(sphere);
+            
+            model = group;
+            scene.add(model);
+            
+            updateProgress(100, 'Тестовая модель создана');
+            
+            setTimeout(() => {
+                show3DViewer();
+                centerModelInView();
+                showMessage('Загружена тестовая модель вместо основной');
+            }, 500);
         }
         
         function show3DViewer() {
@@ -316,100 +434,59 @@
             updateCameraStatus();
         }
         
-        function createTestModel() {
-            if (model) {
-                scene.remove(model);
-                model = null;
-            }
-            
-            const geometry = new THREE.BoxGeometry(2, 3, 1);
-            const material = new THREE.MeshLambertMaterial({ 
-                color: 0x3498db
-            });
-            
-            model = new THREE.Mesh(geometry, material);
-            scene.add(model);
-            
-            show3DViewer();
-            
-            setTimeout(() => {
-                centerModelInView();
-            }, 100);
-        }
-        
-        // ============ ИНИЦИАЛИЗАЦИЯ THREE.JS ============
+        // ============ ИНИЦИАЛИЗАЦИЯ ============
         function initThreeJS() {
             console.log('Инициализация Three.js...');
             
-            // Создаем сцену
             scene = new THREE.Scene();
-            
-            // Фон
             scene.background = new THREE.Color(0x87CEEB);
             
-            // Земля
-            const groundGeometry = new THREE.PlaneGeometry(200, 200);
-            const groundMaterial = new THREE.MeshLambertMaterial({ 
-                color: 0xF5F5DC
-            });
-            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            // Простая земля
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(200, 200),
+                new THREE.MeshLambertMaterial({ color: 0xF5F5DC })
+            );
             ground.rotation.x = -Math.PI / 2;
             ground.position.y = -0.1;
             ground.receiveShadow = true;
             scene.add(ground);
             
-            // Сетка
-            const gridHelper = new THREE.GridHelper(100, 50, 0x888888, 0xCCCCCC);
+            // Простая сетка
+            const gridHelper = new THREE.GridHelper(100, 20, 0x888888, 0xCCCCCC);
             gridHelper.position.y = 0.01;
             scene.add(gridHelper);
             
-            // Камера
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // Рендерер
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.shadowMap.enabled = true;
             
-            const container = document.getElementById('canvas-container');
-            container.appendChild(renderer.domElement);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
             
-            // Освещение
-            const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            sunLight.position.set(50, 100, 50);
-            scene.add(sunLight);
+            // Простое освещение
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(50, 100, 50);
+            scene.add(light);
             
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
             
-            // Инициализируем камеру
             updateOrbitCamera();
-            
-            // Настройка управления
             setupControls();
-            
-            // Запускаем загрузку модели
             loadModel();
-            
-            // Запуск анимации
             animate();
             
-            // Ресайз окна
             window.addEventListener('resize', onWindowResize);
-            
-            console.log('✅ Three.js инициализирован');
         }
         
-        // ============ УПРАВЛЕНИЕ ============
+        // ============ ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений) ============
         function setupControls() {
             const canvas = renderer.domElement;
             
-            // Клавиатура
             document.addEventListener('keydown', (e) => {
                 const key = e.key.toLowerCase();
                 keys[key] = true;
-                
                 if (e.code === 'Space') {
                     centerModelInView();
                     e.preventDefault();
@@ -420,7 +497,6 @@
                 keys[e.key.toLowerCase()] = false;
             });
             
-            // Мышь
             canvas.addEventListener('mousedown', (e) => {
                 if (e.button === 0) {
                     isLeftMouseDown = true;
@@ -429,7 +505,6 @@
                     isRightMouseDown = true;
                     canvas.style.cursor = 'move';
                 }
-                
                 lastMouseX = e.clientX;
                 lastMouseY = e.clientY;
             });
@@ -441,44 +516,30 @@
                 if (isLeftMouseDown) {
                     orbitAngleY -= deltaX * rotationSpeed;
                     orbitAngleX += deltaY * rotationSpeed;
-                    
                     orbitAngleX = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, orbitAngleX));
-                    
                     updateOrbitCamera();
                     updateCameraStatus();
-                    
                 } else if (isRightMouseDown) {
                     const forward = new THREE.Vector3();
                     const right = new THREE.Vector3();
                     const up = new THREE.Vector3(0, 1, 0);
-                    
                     camera.getWorldDirection(forward);
                     right.crossVectors(up, forward).normalize();
-                    
                     const panX = -deltaX * panSpeed * orbitDistance;
                     const panY = deltaY * panSpeed * orbitDistance;
-                    
                     orbitTarget.add(right.clone().multiplyScalar(panX));
                     orbitTarget.y += panY;
-                    
                     updateOrbitCamera();
                     updateCameraStatus();
                 }
-                
                 lastMouseX = e.clientX;
                 lastMouseY = e.clientY;
             });
             
             canvas.addEventListener('mouseup', (e) => {
-                if (e.button === 0) {
-                    isLeftMouseDown = false;
-                } else if (e.button === 2) {
-                    isRightMouseDown = false;
-                }
-                
-                if (!isLeftMouseDown && !isRightMouseDown) {
-                    canvas.style.cursor = 'grab';
-                }
+                if (e.button === 0) isLeftMouseDown = false;
+                if (e.button === 2) isRightMouseDown = false;
+                if (!isLeftMouseDown && !isRightMouseDown) canvas.style.cursor = 'grab';
             });
             
             canvas.addEventListener('mouseleave', () => {
@@ -487,7 +548,6 @@
                 canvas.style.cursor = 'grab';
             });
             
-            // Колесико
             canvas.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 const zoomFactor = 1 + (e.deltaY > 0 ? zoomSpeed : -zoomSpeed);
@@ -500,130 +560,49 @@
             canvas.addEventListener('contextmenu', (e) => e.preventDefault());
         }
         
-        // ============ ЦЕНТРИРОВАНИЕ МОДЕЛИ ============
         function centerModelInView() {
             if (!model) return;
-            
             const box = new THREE.Box3().setFromObject(model);
             const modelCenter = box.getCenter(new THREE.Vector3());
             const modelSize = box.getSize(new THREE.Vector3());
             const maxModelSize = Math.max(modelSize.x, modelSize.y, modelSize.z);
-            
             orbitTarget.copy(modelCenter);
-            
             const fovRad = camera.fov * Math.PI / 180;
             const optimalDistance = (maxModelSize / 2) / Math.tan(fovRad / 2);
             orbitDistance = Math.max(optimalDistance * 1.5, 2);
-            
             orbitAngleX = Math.PI / 6;
             orbitAngleY = Math.PI / 4;
-            
-            animateCameraToTarget();
-            showMessage('Модель центрирована перед камерой');
-        }
-        
-        function animateCameraToTarget() {
-            const targetOrbitDistance = orbitDistance;
-            const targetOrbitAngleX = orbitAngleX;
-            const targetOrbitAngleY = orbitAngleY;
-            
-            let currentDistance = orbitDistance;
-            let currentAngleX = orbitAngleX;
-            let currentAngleY = orbitAngleY;
-            
-            const duration = 500;
-            const startTime = Date.now();
-            
-            function animateStep() {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                const easeProgress = progress < 0.5 
-                    ? 2 * progress * progress 
-                    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                
-                orbitDistance = currentDistance + (targetOrbitDistance - currentDistance) * easeProgress;
-                orbitAngleX = currentAngleX + (targetOrbitAngleX - currentAngleX) * easeProgress;
-                orbitAngleY = currentAngleY + (targetOrbitAngleY - currentAngleY) * easeProgress;
-                
-                updateOrbitCamera();
-                updateCameraStatus();
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animateStep);
-                }
-            }
-            
-            animateStep();
+            updateOrbitCamera();
+            showMessage('Модель центрирована');
         }
         
         function showMessage(text) {
             const message = document.getElementById('message');
             message.textContent = text;
             message.style.display = 'block';
-            
-            setTimeout(() => {
-                message.style.display = 'none';
-            }, 2000);
+            setTimeout(() => message.style.display = 'none', 2000);
         }
         
-        // ============ УПРАВЛЕНИЕ С КЛАВИАТУРЫ ============
         function handleKeyboardMovement() {
-            let zoomChanged = false;
-            let rotationChanged = false;
-            
-            if (keys['w'] || keys['ц']) {
-                orbitDistance = Math.max(0.5, orbitDistance - cameraSpeed);
-                zoomChanged = true;
-            }
-            if (keys['s'] || keys['ы']) {
-                orbitDistance = Math.min(100, orbitDistance + cameraSpeed);
-                zoomChanged = true;
-            }
-            
-            if (keys['arrowup']) {
-                orbitAngleX = Math.min(Math.PI/2 - 0.1, orbitAngleX + rotationSpeed);
-                rotationChanged = true;
-            }
-            if (keys['arrowdown']) {
-                orbitAngleX = Math.max(-Math.PI/2 + 0.1, orbitAngleX - rotationSpeed);
-                rotationChanged = true;
-            }
-            
-            if (keys['arrowleft'] || keys['a'] || keys['ф']) {
-                orbitAngleY += rotationSpeed * 2;
-                rotationChanged = true;
-            }
-            if (keys['arrowright'] || keys['d'] || keys['в']) {
-                orbitAngleY -= rotationSpeed * 2;
-                rotationChanged = true;
-            }
-            
-            if (keys['q'] || keys['й']) {
-                orbitAngleX = Math.min(Math.PI/2 - 0.1, orbitAngleX + rotationSpeed);
-                rotationChanged = true;
-            }
-            if (keys['e'] || keys['у']) {
-                orbitAngleX = Math.max(-Math.PI/2 + 0.1, orbitAngleX - rotationSpeed);
-                rotationChanged = true;
-            }
-            
-            if (zoomChanged || rotationChanged) {
-                updateOrbitCamera();
-                updateCameraStatus();
-            }
+            let changed = false;
+            if (keys['w'] || keys['ц']) { orbitDistance = Math.max(0.5, orbitDistance - cameraSpeed); changed = true; }
+            if (keys['s'] || keys['ы']) { orbitDistance = Math.min(100, orbitDistance + cameraSpeed); changed = true; }
+            if (keys['arrowup']) { orbitAngleX = Math.min(Math.PI/2 - 0.1, orbitAngleX + rotationSpeed); changed = true; }
+            if (keys['arrowdown']) { orbitAngleX = Math.max(-Math.PI/2 + 0.1, orbitAngleX - rotationSpeed); changed = true; }
+            if (keys['arrowleft'] || keys['a'] || keys['ф']) { orbitAngleY += rotationSpeed * 2; changed = true; }
+            if (keys['arrowright'] || keys['d'] || keys['в']) { orbitAngleY -= rotationSpeed * 2; changed = true; }
+            if (keys['q'] || keys['й']) { orbitAngleX = Math.min(Math.PI/2 - 0.1, orbitAngleX + rotationSpeed); changed = true; }
+            if (keys['e'] || keys['у']) { orbitAngleX = Math.max(-Math.PI/2 + 0.1, orbitAngleX - rotationSpeed); changed = true; }
+            if (changed) { updateOrbitCamera(); updateCameraStatus(); }
         }
         
-        // ============ ОБНОВЛЕНИЕ КАМЕРЫ ============
         function updateOrbitCamera() {
             const x = orbitDistance * Math.cos(orbitAngleX) * Math.sin(orbitAngleY);
             const y = orbitDistance * Math.sin(orbitAngleX);
             const z = orbitDistance * Math.cos(orbitAngleX) * Math.cos(orbitAngleY);
-            
             camera.position.x = orbitTarget.x + x;
             camera.position.y = orbitTarget.y + y;
             camera.position.z = orbitTarget.z + z;
-            
             camera.lookAt(orbitTarget);
         }
         
@@ -631,7 +610,6 @@
             document.getElementById('distance-value').textContent = orbitDistance.toFixed(1);
         }
         
-        // ============ АНИМАЦИЯ ============
         function animate() {
             requestAnimationFrame(animate);
             handleKeyboardMovement();
@@ -646,13 +624,7 @@
             }
         }
         
-        // ============ ЗАПУСК ============
-        window.addEventListener('DOMContentLoaded', function() {
-            initThreeJS();
-            console.log('✅ 3D Просмотрщик готов!');
-        });
-        
+        window.addEventListener('DOMContentLoaded', initThreeJS);
     </script>
 </body>
-
 </html>
